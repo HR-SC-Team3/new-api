@@ -1,0 +1,908 @@
+import json
+import time
+from pathlib import Path
+
+import pytest
+import requests
+
+from schemas import Location, Warehouse
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WAREHOUSES_MODEL_SOURCE = (REPO_ROOT / "api" / "models" / "warehouses.py").read_text(encoding="utf-8")
+
+
+# region Shared helpers
+
+
+def _get_headers(user_headers, method="get", allowed=True):
+    return user_headers(
+        resource="warehouses",
+        method=method,
+        allowed=allowed,
+    )
+
+
+def _first_warehouse(base_url, user_headers):
+    headers = _get_headers(user_headers)
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body, "fixture data/warehouse.json is expected to be non-empty"
+
+    return body[0]
+
+
+# endregion
+
+
+# region GET /warehouses (collection)
+
+
+def test_get_warehouses_returns_200_with_valid_response(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    assert isinstance(body, list)
+    assert len(body) > 0
+    assert "id" in body[0]
+
+
+def test_response_body_matches_documented_schema(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+
+    for raw in body:
+        Warehouse.model_validate(raw)
+
+
+def test_response_content_type_is_json(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers=headers
+    )
+
+    assert response.headers.get(
+        "Content-Type",
+        "",
+    ).startswith("application/json")
+
+
+def test_response_time_is_reasonable(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    start = time.monotonic()
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers=headers
+    )
+
+    elapsed = time.monotonic() - start
+
+    assert response.status_code == 200
+    assert (
+        elapsed < 0.5
+    ), f"GET /warehouses took {elapsed:.2f}s, which is unreasonably slow"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param({"page": 1}, id="pagination-page"),
+        pytest.param({"limit": 5}, id="pagination-limit"),
+        pytest.param({"sort": "name"}, id="sort-name"),
+        pytest.param({"page": -1}, id="invalid-negative-page"),
+        pytest.param({"totally_unknown_key": "x"}, id="unknown-key"),
+    ],
+)
+def test_query_params_are_ignored(base_url, user_headers, params):
+    headers = _get_headers(user_headers)
+    url = f"{base_url}/api/v1/warehouses"
+
+    baseline = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, params=params)
+
+    assert response.status_code == 200
+    assert response.json() == baseline.json()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Query parameters are ignored, so pagination is not honoured.",
+)
+def test_query_param_limit_is_honoured(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses",
+        headers=headers,
+        params={"limit": 1},
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) <= 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Query parameters are ignored, so sorting is not honoured.",
+)
+def test_query_param_sort_is_honoured(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses",
+        headers=headers,
+        params={"sort": "name"},
+    )
+
+    names = [w["name"] for w in response.json()]
+    assert names == sorted(names)
+
+
+def test_missing_api_key_is_rejected_with_401(base_url):
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses"
+    )
+
+    assert response.status_code == 401
+
+
+def test_invalid_api_key_is_rejected_with_401(base_url):
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses", headers={"API_KEY": "not-a-real-key"}
+    )
+
+    assert response.status_code == 401
+
+
+# endregion
+
+
+# region GET /warehouses/{id}
+
+
+def test_get_warehouse_by_id_returns_200_with_correct_resource(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == existing
+
+
+def test_get_warehouse_by_id_matches_documented_schema(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    Warehouse.model_validate(response.json())
+
+
+def test_get_warehouse_by_nonexistent_id_returns_404(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/999999", headers=headers
+    )
+
+    assert response.status_code == 404
+
+
+def test_get_warehouse_by_malformed_id_returns_400(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/not-an-id", headers=headers
+    )
+
+    assert response.status_code == 400
+
+
+def test_get_warehouse_by_id_requires_authentication(base_url):
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/1"
+    )
+
+    assert response.status_code == 401
+
+
+
+def test_get_warehouse_by_id_response_content_type_is_json(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url,
+        user_headers,
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    assert response.headers.get(
+        "Content-Type",
+        "",
+    ).startswith("application/json")
+
+
+def test_get_warehouse_malformed_id_error_leaks_no_internal_details(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/not-an-id", headers=headers
+    )
+
+    text_lower = response.text.lower()
+
+    for leak_indicator in (
+        "traceback",
+        "exception",
+        "valueerror",
+        'file "',
+        "line "
+    ):
+        assert leak_indicator not in text_lower
+
+
+# endregion
+
+
+# region GET /warehouses/{id}/locations
+
+
+def test_get_warehouse_locations_returns_200(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}/locations", headers=headers
+    )
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_get_warehouse_locations_belong_to_requested_warehouse(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}/locations", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    locations = response.json()
+
+    for location in locations:
+        assert location["warehouse_id"] == existing["id"]
+
+
+def test_get_warehouse_locations_match_documented_schema(base_url, user_headers):
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}/locations", headers=headers
+    )
+
+    assert response.status_code == 200
+
+    for location in response.json():
+        Location.model_validate(location)
+
+
+def test_get_warehouse_locations_requires_authentication(base_url):
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/1/locations"
+    )
+
+    assert response.status_code == 401
+
+
+
+def test_get_warehouse_locations_response_content_type_is_json(base_url, user_headers ):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        f"{base_url}/api/v1/warehouses/1/locations", headers=headers
+    )
+
+    assert response.headers.get(
+        "Content-Type",
+        "",
+    ).startswith("application/json")
+
+
+# endregion
+
+
+# region POST /warehouses
+
+
+def test_post_warehouse_valid_payload_returns_201(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    payload = {
+        "id": 555555,
+        "code": "TEST-WH",
+        "name": "Test Warehouse",
+        "address": "1 Test Street",
+        "city": "Testville",
+        "zip_code": "0000AA",
+        "province": "Test",
+        "country": "Netherlands",
+        "contact_name": "Test Person",
+        "contact_phone": "+31000000000",
+        "contact_email": "test@example.com",
+    }
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, json=payload
+    )
+
+    assert response.status_code == 201
+
+
+def test_post_warehouse_returns_created_resource(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    payload = {
+        "id": 555556,
+        "code": "TEST-WH-2",
+        "name": "Test Warehouse 2",
+        "address": "2 Test Street",
+        "city": "Testville",
+        "zip_code": "0000AA",
+        "province": "Test",
+        "country": "Netherlands",
+        "contact_name": "Test Person",
+        "contact_phone": "+31000000000",
+        "contact_email": "test2@example.com",
+    }
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, json=payload
+    )
+
+    assert response.status_code == 201
+
+    body = response.json()
+
+    Warehouse.model_validate(body)
+
+    for key, value in payload.items():
+        assert body[key] == value
+
+def test_post_warehouse_missing_required_fields_returns_400(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, json={}
+    )
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_warehouse_invalid_field_type_is_rejected(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers,
+        json={
+            "id": "not-an-int",
+            "name": "Bad Type Warehouse"
+        }
+    )
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_warehouse_duplicate_id_returns_conflict(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers,
+        json={
+            **existing,
+            "name": "Duplicate Warehouse"
+        }
+    )
+
+    assert response.status_code == 422
+
+
+def test_post_warehouse_string_id_is_rejected(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+    existing = _first_warehouse(base_url, user_headers)
+    headers = _get_headers(user_headers, method="post")
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses",
+        headers=headers,
+        json={**existing, "id": str(existing["id"])},
+    )
+
+    assert response.status_code == 422
+
+
+def test_post_warehouse_is_immediately_retrievable(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="post"
+    )
+
+    payload = {
+        "id": 555557,
+        "code": "TEST-555557",
+        "name": "Retrievable Warehouse",
+        "address": "Teststraat 1",
+        "city": "Veghel",
+        "zip_code": "5461AA",
+        "province": "Noord-Brabant",
+        "country": "Netherlands",
+        "contact_name": "Test Contact",
+        "contact_phone": "0612345678",
+        "contact_email": "test@example.com",
+    }
+
+    create_response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, json=payload
+    )
+
+    assert create_response.status_code == 201
+
+    get_headers = _get_headers(user_headers)
+
+    get_response = requests.get(
+        f"{base_url}/api/v1/warehouses/555557", headers=get_headers
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json() is not None
+    assert get_response.json()["name"] == "Retrievable Warehouse"
+
+
+def test_post_warehouse_requires_authentication(base_url):
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses",
+        json={"name": "No Auth Warehouse"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_post_warehouse_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(
+        user_headers, method="post", allowed=False
+    )
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, json={"name": "Forbidden Warehouse"}
+    )
+
+    assert response.status_code == 403
+
+
+def test_post_warehouse_wrong_content_type_is_rejected(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = {
+        **_get_headers(
+            user_headers,
+            method="post",
+        ),
+        "Content-Type": "text/plain",
+    }
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers,
+        data=json.dumps(
+            {"name": "Plain Text Warehouse"}
+        )
+    )
+
+    assert response.status_code == 415
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Malformed JSON raises JSONDecodeError and is caught by the "
+        "generic 500 handler instead of returning 400/422."
+    ),
+)
+def test_post_warehouse_malformed_json_body_returns_400(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = {
+        **_get_headers(
+            user_headers,
+            method="post",
+        ),
+        "Content-Type": "application/json"
+    }
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses", headers=headers, data="{not valid json"
+    )
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_warehouse_malformed_json_body_leaks_no_internal_details(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("warehouse.json")
+
+    headers = {
+        **_get_headers(
+            user_headers,
+            method="post",
+        ),
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses",
+        headers=headers,
+        data="{not valid json",
+    )
+
+    text_lower = response.text.lower()
+
+    for leak_indicator in (
+        "traceback",
+        "exception",
+        "jsondecodeerror",
+        'file "',
+        "line ",
+    ):
+        assert leak_indicator not in text_lower
+
+
+# endregion
+
+
+# region PUT /warehouses/{id}
+
+
+def test_put_warehouse_valid_payload_returns_200(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(
+        user_headers, method="put"
+    )
+
+    updated = {
+        **existing, "name": "Updated Warehouse Name"
+    }
+
+    response = requests.put(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers, json=updated
+    )
+
+    assert response.status_code == 200
+
+
+def test_put_warehouse_update_is_persisted(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(
+        user_headers, method="put"
+    )
+
+    updated = {
+        **existing, "name": "Persisted Warehouse Name"
+    }
+
+    put_response = requests.put(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers, json=updated
+    )
+
+    assert put_response.status_code == 200
+
+    get_headers = _get_headers(user_headers)
+
+    get_response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=get_headers
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json()["name"] == "Persisted Warehouse Name"
+
+
+def test_put_warehouse_duplicate_id_is_rejected(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+    headers = _get_headers(user_headers, method="put")
+    warehouses = requests.get(f"{base_url}/api/v1/warehouses", headers=_get_headers(user_headers),)
+    assert warehouses.status_code == 200
+    records = warehouses.json()
+    assert len(records) >= 2, "fixture data/warehouse.json needs at least two records"
+    target, other = records[:2]
+    response = requests.put(f"{base_url}/api/v1/warehouses/{target['id']}", headers=headers, json={**target, "id": other["id"]},)
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "Request body id must match URL id"
+
+
+def test_put_warehouse_nonexistent_id_returns_404(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="put"
+    )
+
+    existing = _first_warehouse(base_url, user_headers)
+    missing_id = 999999
+    payload = {
+        **existing,
+        "id": missing_id,
+        "code": "WH-GHOST-999999",
+        "name": "Ghost Warehouse",
+    }
+
+    response = requests.put(
+        f"{base_url}/api/v1/warehouses/{missing_id}",
+        headers=headers,
+        json=payload,
+    )
+
+    assert response.status_code == 404
+
+
+def test_put_warehouse_malformed_id_returns_400(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="put"
+    )
+
+    response = requests.put(
+        f"{base_url}/api/v1/warehouses/not-an-id", headers=headers, json={"name": "Invalid ID Warehouse"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_put_warehouse_replaces_the_whole_record_per_source():
+    assert "self.data[i] = warehouse" in WAREHOUSES_MODEL_SOURCE
+
+
+def test_put_warehouse_requires_authentication(base_url):
+    response = requests.put(
+        f"{base_url}/api/v1/warehouses/1", json={"name": "No Auth Warehouse"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_put_warehouse_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(
+        user_headers, method="put", allowed=False
+    )
+
+    response = requests.put(
+        f"{base_url}/api/v1/warehouses/1", headers=headers, json={"name": "Forbidden Warehouse"}
+    )
+
+    assert response.status_code == 403
+
+
+# endregion
+
+
+# region DELETE /warehouses/{id}
+
+def test_delete_warehouse_valid_id_returns_200(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    headers = _get_headers(
+        user_headers, method="delete"
+    )
+
+    response = requests.delete(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    assert response.status_code in (200, 204)
+
+
+def test_delete_warehouse_resource_is_actually_gone(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers
+    )
+
+    delete_headers = _get_headers(
+        user_headers, method="delete"
+    )
+
+    delete_response = requests.delete(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=delete_headers
+    )
+
+    assert delete_response.status_code in (200, 204)
+
+    get_headers = _get_headers(user_headers)
+
+    get_response = requests.get(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=get_headers
+    )
+
+    assert get_response.status_code == 404
+
+
+def test_delete_warehouse_nonexistent_id_returns_404(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="delete"
+    )
+
+    response = requests.delete(
+        f"{base_url}/api/v1/warehouses/999999", headers=headers
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_warehouse_malformed_id_returns_400(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    headers = _get_headers(
+        user_headers, method="delete"
+    )
+
+    response = requests.delete(
+        f"{base_url}/api/v1/warehouses/not-an-id", headers=headers
+    )
+
+    assert response.status_code == 400
+
+
+def test_delete_warehouse_repeated_delete_returns_404_not_200(base_url, user_headers, preserve_data_files):
+    preserve_data_files("warehouse.json")
+
+    existing = _first_warehouse(
+        base_url, user_headers,
+    )
+
+    headers = _get_headers(
+        user_headers, method="delete"
+    )
+
+    first = requests.delete(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    second = requests.delete(
+        f"{base_url}/api/v1/warehouses/{existing['id']}", headers=headers
+    )
+
+    assert first.status_code in (200, 204)
+    assert second.status_code == 404
+
+
+def test_delete_warehouse_requires_authentication(base_url):
+    response = requests.delete(
+        f"{base_url}/api/v1/warehouses/1"
+    )
+
+    assert response.status_code == 401
+
+
+def test_delete_warehouse_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(user_headers, method="delete", allowed=False)
+
+    response = requests.delete(
+        f"{base_url}/api/v1/warehouses/1", headers=headers
+    )
+
+    assert response.status_code == 403
+
+
+# endregion
+
+
+# region Range validation
+
+
+@pytest.mark.parametrize("bad_id", [0, -1])
+def test_post_warehouse_rejects_non_positive_id(base_url, user_headers, preserve_data_files, bad_id):
+    preserve_data_files("warehouse.json")
+
+    payload = {**_first_warehouse(base_url, user_headers), "id": bad_id, "code": "RANGE-WH"}
+
+    response = requests.post(
+        f"{base_url}/api/v1/warehouses",
+        headers=_get_headers(user_headers, method="post"),
+        json=payload,
+    )
+
+    assert response.status_code == 422
+    assert "greater than 0" in response.json()["error"]
+
+
+# endregion

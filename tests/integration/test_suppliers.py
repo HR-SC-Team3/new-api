@@ -1,0 +1,831 @@
+"""
+/suppliers endpoint tests: GET (collection), GET /{id}, POST, PUT /{id},
+DELETE /{id}, GET /{id}/items.
+
+These tests exercise the checklist for "As a developer I want to know what
+each endpoint does" (sub-issues: GET /suppliers, GET /suppliers/{id},
+POST /suppliers, PUT /suppliers/{id}, DELETE /suppliers/{id},
+GET /suppliers/{id}/items). Several tests are written against the
+*documented*/expected behavior and are marked
+`xfail(strict=True)` where the live server currently does something else.
+This pins the actual, observed behavior so it shows up clearly in test
+output and turns into a loud XPASS failure the moment someone "fixes" it,
+prompting an update to these notes rather than a silent behavior change.
+
+The file is split into `# region` blocks below, one per endpoint, plus a
+shared-helpers region at the top, collapse/expand them in an editor that
+supports region folding to jump straight to one endpoint's tests.
+
+Root cause note (GET /suppliers region): `ApiRequestHandler.do_GET` splits
+the raw request path on "/" (`self.path.split("/")`) without ever stripping
+the query string. Any request with a "?..." on it turns `paths[0]` into
+e.g. "suppliers?page=1" instead of "suppliers". That string is not a key in
+the caller's `endpoint_access` map, so `auth_provider.has_access` returns
+False and the request is rejected with 403 Forbidden even for a
+fully-authorized user sending an otherwise completely ordinary request. In
+short: today, sending *any* query string to GET /suppliers breaks the
+request for everyone, regardless of what that query string would even do.
+"""
+
+import json
+import time
+from pathlib import Path
+
+import pytest
+import requests
+
+from schemas import Supplier
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+SUPPLIERS_MODEL_SOURCE = (REPO_ROOT / "api" / "models" / "suppliers.py").read_text(
+    encoding="utf-8"
+)
+
+
+# region Shared helpers
+def _url(base_url, path=""):
+    return f"{base_url}/api/v1/suppliers{path}"
+
+
+def _get_headers(user_headers, method="get", allowed=True):
+    return user_headers(resource="suppliers", method=method, allowed=allowed)
+
+
+def _first_supplier(base_url, user_headers):
+    headers = _get_headers(user_headers)
+    body = requests.get(_url(base_url), headers=headers).json()
+    assert body, "fixture data/supplier.json is expected to be non-empty"
+    return body[0]
+
+
+# endregion
+
+
+# region GET /suppliers (collection)
+def test_get_suppliers_returns_200_with_valid_response(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    response = requests.get(_url(base_url), headers=headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body, list)
+    assert len(body) > 0
+    assert "id" in body[0]
+
+
+def test_response_body_matches_documented_schema(base_url, user_headers):
+    """Field names, types and (flat) nesting must match the `Supplier` schema."""
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    response = requests.get(_url(base_url), headers=headers)
+
+    body = response.json()
+    for raw in body:
+        Supplier.model_validate(raw)
+
+
+def test_response_content_type_is_json(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    response = requests.get(_url(base_url), headers=headers)
+
+    assert response.headers.get("Content-Type", "").startswith("application/json")
+
+
+def test_response_time_is_reasonable(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+
+    start = time.monotonic()
+    response = requests.get(_url(base_url), headers=headers)
+    elapsed = time.monotonic() - start
+
+    assert response.status_code == 200
+    assert (
+        elapsed < 0.5
+    ), f"GET /suppliers took {elapsed:.2f}s, which is unreasonably slow"
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        pytest.param({"page": 1}, id="pagination-page"),
+        pytest.param({"limit": 5}, id="pagination-limit"),
+        pytest.param({"country": "Netherlands"}, id="filter-country"),
+        pytest.param({"sort": "name"}, id="sort-name"),
+        pytest.param({"page": -1}, id="invalid-negative-page"),
+        pytest.param({"totally_unknown_key": "x"}, id="unknown-key"),
+    ],
+)
+def test_query_params_are_ignored(base_url, user_headers, params):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    baseline = requests.get(_url(base_url), headers=headers)
+    response = requests.get(_url(base_url), headers=headers, params=params)
+
+    assert response.status_code == 200
+    assert response.json() == baseline.json()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Query parameters are ignored, so pagination is not honoured.",
+)
+def test_query_param_limit_is_honoured(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    response = requests.get(_url(base_url), headers=headers, params={"limit": 1})
+
+    assert response.status_code == 200
+    assert len(response.json()) <= 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Query parameters are ignored, so filtering is not honoured.",
+)
+def test_query_param_filter_is_honoured(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    name = requests.get(_url(base_url), headers=headers).json()[0]["name"]
+    response = requests.get(_url(base_url), headers=headers, params={"name": name})
+
+    assert response.status_code == 200
+    assert all(row["name"] == name for row in response.json())
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="Query parameters are ignored, so sorting is not honoured.",
+)
+def test_query_param_sort_is_honoured(base_url, user_headers):
+    headers = user_headers(resource="suppliers", method="get", allowed=True)
+    response = requests.get(_url(base_url), headers=headers, params={"sort": "name", "order": "desc"})
+
+    values = [row["name"] for row in response.json()]
+    assert values == sorted(values, reverse=True)
+
+
+@pytest.mark.skip(
+    reason=(
+        "GET /suppliers has no implemented filtering, so there is "
+        "no supported way to induce an empty result set without mutating the "
+        "shared data/supplier.json fixture out from under other tests. "
+        "Redesign suggestion: support a filter (e.g. ?country=) so this is testable."
+    )
+)
+def test_empty_result_set_returns_200_with_empty_array(base_url, user_headers):
+    pass
+
+
+def test_insufficient_permissions_returns_403(base_url, user_headers):
+    """
+    None of the originally seeded users in data/user.json were forbidden from
+    GET /suppliers, so an "audit_viewer" fixture user (endpoint_access.suppliers
+    all False, everything else read-only True) was added to data/user.json to
+    make this case testable at all.
+    """
+    headers = user_headers(resource="suppliers", method="get", allowed=False)
+    response = requests.get(_url(base_url), headers=headers)
+
+    assert response.status_code == 403
+
+
+def test_missing_api_key_is_rejected_with_401(base_url):
+    response = requests.get(_url(base_url))
+
+    assert response.status_code == 401
+
+
+def test_invalid_api_key_is_rejected_with_401(base_url):
+    response = requests.get(
+        _url(base_url), headers={"API_KEY": "not-a-real-key"}
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Error responses (401 here, 403 for query params above) have an empty "
+        "body and no Content-Type header at all, unlike success responses which "
+        "are always `application/json`. There is no consistent error schema "
+        "across the API to assert against. Redesign suggestion: every error "
+        "response should return a JSON body with a stable shape, e.g. "
+        '{"error": {"code": ..., "message": ...}}.'
+    ),
+)
+def test_error_response_has_consistent_json_schema(base_url):
+    response = requests.get(_url(base_url))
+
+    assert response.status_code == 401
+    assert response.headers.get("Content-Type", "").startswith("application/json")
+    body = response.json()
+    assert "error" in body
+
+
+def test_error_response_leaks_no_internal_details(base_url):
+    response = requests.get(_url(base_url))
+
+    text_lower = response.text.lower()
+    for leak_indicator in (
+        "traceback",
+        "exception",
+        "stack",
+        "internal",
+        "sql",
+        'file "',
+        "line ",
+    ):
+        assert leak_indicator not in text_lower
+
+
+# endregion
+
+
+# region GET /suppliers/{id}
+# Same routing/logging issues as the collection endpoint apply here too
+# (see module docstring), plus its own: `int(paths[1])` is called with no
+# try/except around it, so a non-numeric id falls through to the generic
+# `except Exception: send_response(500)` in do_GET instead of a 400, and a
+# numeric-but-nonexistent id returns 200 with a JSON body of `null` instead
+# of 404 (get_supplier() returns None, which main.py serializes as-is).
+
+
+def test_get_supplier_by_id_returns_200_with_correct_resource(base_url, user_headers):
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+
+    assert response.status_code == 200
+    assert response.json() == existing
+
+
+def test_get_supplier_by_id_matches_documented_schema(base_url, user_headers):
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+
+    Supplier.model_validate(response.json())
+
+
+def test_get_supplier_by_nonexistent_id_returns_404(base_url, user_headers):
+    headers = _get_headers(user_headers)
+    response = requests.get(_url(base_url, f"/999999"), headers=headers)
+
+    assert response.status_code == 404
+
+
+def test_get_supplier_by_malformed_id_returns_400(base_url, user_headers):
+    headers = _get_headers(user_headers)
+    response = requests.get(_url(base_url, f"/not-an-id"), headers=headers)
+
+    assert response.status_code == 400
+
+
+def test_get_supplier_by_id_requires_authentication(base_url):
+    response = requests.get(_url(base_url, f"/1"))
+
+    assert response.status_code == 401
+
+
+def test_get_supplier_by_id_insufficient_permissions_returns_403(
+    base_url, user_headers
+):
+    headers = _get_headers(user_headers, allowed=False)
+    response = requests.get(_url(base_url, f"/1"), headers=headers)
+
+    assert response.status_code == 403
+
+
+def test_get_supplier_by_id_response_content_type_is_json(base_url, user_headers):
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers)
+
+    response = requests.get(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+
+    assert response.headers.get("Content-Type", "").startswith("application/json")
+
+
+def test_get_supplier_by_malformed_id_error_leaks_no_internal_details(
+    base_url, user_headers
+):
+    headers = _get_headers(user_headers)
+    response = requests.get(_url(base_url, f"/not-an-id"), headers=headers)
+
+    text_lower = response.text.lower()
+    for leak_indicator in ("traceback", "exception", "valueerror", 'file "', "line "):
+        assert leak_indicator not in text_lower
+
+
+# endregion
+
+
+# region GET /suppliers/{id}/items
+# Items.get_items_for_supplier() has no existence check on the parent
+# supplier at all, so a nonexistent parent id returns 200 with an empty
+# array (indistinguishable from a real supplier that simply has no items)
+# instead of 404.
+
+
+def test_get_supplier_items_returns_200(base_url, user_headers):
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers)
+
+    response = requests.get(_url(base_url, f"/{existing['id']}/items"), headers=headers)
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+def test_get_supplier_items_are_consistent_with_items_endpoint(base_url, user_headers):
+    """
+    The only "related object" a supplier has is its /items sub-resource.
+    Every item it returns should reference this supplier and match the
+    standalone /items/{id} record.
+    """
+    existing = _first_supplier(base_url, user_headers)
+    supplier_headers = _get_headers(user_headers)
+    item_headers = user_headers(resource="items", method="get", allowed=True)
+
+    items_response = requests.get(
+        _url(base_url, f"/{existing['id']}/items"), headers=supplier_headers
+    )
+    assert items_response.status_code == 200
+    items = items_response.json()
+
+    for item in items:
+        assert item["supplier_id"] == existing["id"]
+        direct = requests.get(
+            f"{base_url}/api/v1/items/{item['id']}", headers=item_headers
+        )
+        assert direct.status_code == 200
+        assert direct.json() == item
+
+
+def test_get_supplier_items_nonexistent_parent_returns_404(base_url, user_headers):
+    headers = _get_headers(user_headers)
+
+    response = requests.get(_url(base_url, "/999999/items"), headers=headers)
+
+    assert response.status_code == 404
+
+
+def test_get_supplier_items_requires_authentication(base_url):
+    response = requests.get(_url(base_url, "/1/items"))
+
+    assert response.status_code == 401
+
+
+def test_get_supplier_items_insufficient_permissions_returns_403(
+    base_url, user_headers
+):
+    headers = _get_headers(user_headers, allowed=False)
+    response = requests.get(_url(base_url, "/1/items"), headers=headers)
+
+    assert response.status_code == 403
+
+
+def test_get_supplier_items_response_content_type_is_json(base_url, user_headers):
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers)
+
+    response = requests.get(_url(base_url, f"/{existing['id']}/items"), headers=headers)
+
+    assert response.headers.get("Content-Type", "").startswith("application/json")
+
+
+# endregion
+
+
+# region POST /suppliers
+
+
+def test_post_supplier_returns_created_resource_with_id(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="post")
+    payload = {
+        "code": "SUP-TEST-1",
+        "name": "Test Supplier Co",
+        "address": "1 Test Street",
+        "city": "Testville",
+        "zip_code": "0000AA",
+        "province": "Test",
+        "country": "Testland",
+        "contact_name": "Tess Ter",
+        "phone_number": "+31000000000",
+        "reference": "Test",
+    }
+
+    response = requests.post(
+        _url(base_url), headers=headers, json=payload
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert "id" in body
+    for key, value in payload.items():
+        assert body[key] == value
+
+
+def test_post_supplier_response_points_to_new_resource(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="post")
+    existing = _first_supplier(base_url, user_headers)
+    payload = {
+        key: value
+        for key, value in existing.items()
+        if key not in {"id", "created_at", "updated_at"}
+    }
+    payload["code"] = f"{existing['code']}-LOCATE-{existing['id']}"
+    payload["name"] = "Locate Me Co"
+    response = requests.post(
+        _url(base_url), headers=headers, json=payload
+    )
+
+    assert response.status_code == 201
+    assert "Location" in response.headers
+
+
+def test_post_supplier_missing_required_fields_returns_400(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="post")
+
+    response = requests.post(_url(base_url), headers=headers, json={})
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_supplier_invalid_field_type_is_rejected(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="post")
+
+    response = requests.post(
+        _url(base_url),
+        headers=headers,
+        json={"id": "not-an-int", "name": "Bad Type Co"},
+    )
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_supplier_duplicate_id_returns_conflict(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers, method="post")
+
+    response = requests.post(
+        _url(base_url),
+        headers=headers,
+        json={**existing, "name": "Duplicate Of " + existing["name"]},
+    )
+
+    assert response.status_code in (409, 422)
+
+
+def test_post_supplier_is_immediately_retrievable(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="post")
+    existing = _first_supplier(base_url, user_headers)
+    payload = {
+        **existing,
+        "id": 555555,
+        "code": "SUP-555555",
+        "name": "Retrievable Co",
+    }
+    create_response = requests.post(
+        _url(base_url), headers=headers, json=payload
+    )
+    assert create_response.status_code == 201
+
+    get_headers = _get_headers(user_headers)
+    get_response = requests.get(
+        _url(base_url, f"/555555"), headers=get_headers
+    )
+
+    assert get_response.status_code == 200
+    assert get_response.json() is not None
+    assert get_response.json()["name"] == "Retrievable Co"
+
+
+@pytest.mark.skip(
+    reason=(
+        "The Supplier schema has no foreign-key fields (id, code, name, address, "
+        "city, zip_code, province, country, contact_name, phone_number, "
+        "reference, created_at, updated_at) to validate on creation."
+        "Unlike e.g. a location's warehouse_id, there is nothing on a supplier "
+        "payload to validate a reference for. N/A for this resource."
+    )
+)
+def test_post_supplier_invalid_foreign_key_is_rejected(base_url, user_headers):
+    pass
+
+
+def test_post_supplier_requires_authentication(base_url):
+    response = requests.post(
+        _url(base_url), json={"name": "No Auth Co"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_post_supplier_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(user_headers, method="post", allowed=False)
+    response = requests.post(
+        _url(base_url), headers=headers, json={"name": "Forbidden Co"}
+    )
+
+    assert response.status_code == 403
+
+def test_post_supplier_wrong_content_type_is_rejected(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = {
+        **_get_headers(user_headers, method="post"),
+        "Content-Type": "text/plain",
+    }
+
+    response = requests.post(
+        _url(base_url),
+        headers=headers,
+        data=json.dumps({"name": "Plain Text Co"}),
+    )
+
+    assert response.status_code == 415
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "A malformed (non-JSON) body makes json.loads() raise, which is caught "
+        "only by the generic `except Exception: send_response(500)` wrapper in "
+        "do_POST. Actual: 500. Expected: 400/422."
+    ),
+)
+def test_post_supplier_malformed_json_body_returns_400(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = {
+        **_get_headers(user_headers, method="post"),
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(
+        _url(base_url), headers=headers, data="{not valid json"
+    )
+
+    assert response.status_code in (400, 422)
+
+
+def test_post_supplier_malformed_json_body_leaks_no_internal_details(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = {
+        **_get_headers(user_headers, method="post"),
+        "Content-Type": "application/json",
+    }
+
+    response = requests.post(
+        _url(base_url), headers=headers, data="{not valid json"
+    )
+
+    text_lower = response.text.lower()
+    for leak_indicator in (
+        "traceback",
+        "exception",
+        "jsondecodeerror",
+        'file "',
+        "line ",
+    ):
+        assert leak_indicator not in text_lower
+
+
+# endregion
+
+
+# region PUT /suppliers/{id}
+
+
+def test_put_supplier_valid_payload_returns_200(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers, method="put")
+
+    updated = {**existing, "name": "Updated Name Co"}
+    response = requests.put(
+        _url(base_url, f"/{existing['id']}"), headers=headers, json=updated
+    )
+
+    assert response.status_code == 200
+
+
+def test_put_supplier_update_is_persisted(base_url, user_headers, preserve_data_files):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers, method="put")
+
+    updated = {**existing, "name": "Persisted Name Co"}
+    put_response = requests.put(
+        _url(base_url, f"/{existing['id']}"), headers=headers, json=updated
+    )
+    assert put_response.status_code == 200
+
+    get_headers = _get_headers(user_headers)
+    get_response = requests.get(
+        _url(base_url, f"/{existing['id']}"), headers=get_headers
+    )
+    assert get_response.json()["name"] == "Persisted Name Co"
+
+
+def test_put_supplier_nonexistent_id_returns_404(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="put")
+
+    existing = _first_supplier(base_url, user_headers)
+    missing_id = 999999999999
+    payload = {
+        **existing,
+        "id": missing_id,
+        "code": "SUP-GHOST-999999999999",
+        "name": "Ghost Co",
+    }
+
+    response = requests.put(
+        _url(base_url, f"/{missing_id}"),
+        headers=headers,
+        json=payload,
+    )
+    assert response.status_code == 404
+
+
+def test_put_supplier_malformed_id_returns_400(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="put")
+
+    response = requests.put(
+        _url(base_url, f"/not-an-id"), headers=headers, json={"name": "x"}
+    )
+
+    assert response.status_code == 400
+
+
+def test_put_supplier_replaces_the_whole_record_per_source(
+    base_url, user_headers, preserve_data_files
+):
+    """
+    Not independently observable through the API today (the persistence no-op
+    above hides it), but worth recording from reading the source directly:
+    Suppliers.update_supplier() does `self.data[i] = supplier`, i.e. a full
+    replace of the stored record with whatever the client sent. Not a merge
+    of only the provided fields. A client that PUTs a partial payload would,
+    if persistence worked, silently drop every field it omitted.
+    """
+    assert "self.data[i] = supplier" in SUPPLIERS_MODEL_SOURCE
+
+
+@pytest.mark.skip(
+    reason=(
+        "Same as POST: the Supplier schema has no foreign-key fields to "
+        "validate on update. N/A for this resource."
+    )
+)
+def test_put_supplier_invalid_foreign_key_is_rejected(base_url, user_headers):
+    pass
+
+
+def test_put_supplier_requires_authentication(base_url):
+    response = requests.put(
+        _url(base_url, f"/1"), json={"name": "No Auth Co"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_put_supplier_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(user_headers, method="put", allowed=False)
+    response = requests.put(
+        _url(base_url, f"/1"), headers=headers, json={"name": "Forbidden Co"}
+    )
+
+    assert response.status_code == 403
+
+
+# endregion
+
+
+# region DELETE /suppliers/{id}
+
+
+def test_delete_supplier_valid_id_returns_200(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers, method="delete")
+
+    response = requests.delete(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+
+    assert response.status_code in (200, 204)
+
+
+def test_delete_supplier_resource_is_actually_gone(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    delete_headers = _get_headers(user_headers, method="delete")
+
+    delete_response = requests.delete(
+        _url(base_url, f"/{existing['id']}"), headers=delete_headers
+    )
+    assert delete_response.status_code in (200, 204)
+
+    get_headers = _get_headers(user_headers)
+    get_response = requests.get(
+        _url(base_url, f"/{existing['id']}"), headers=get_headers
+    )
+    assert get_response.status_code == 404
+
+
+def test_delete_supplier_nonexistent_id_returns_404(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="delete")
+
+    response = requests.delete(_url(base_url, f"/999999"), headers=headers)
+
+    assert response.status_code == 404
+
+
+def test_delete_supplier_malformed_id_returns_400(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    headers = _get_headers(user_headers, method="delete")
+
+    response = requests.delete(
+        _url(base_url, f"/not-an-id"), headers=headers
+    )
+
+    assert response.status_code == 400
+
+
+def test_delete_supplier_repeated_delete_returns_404_not_500(
+    base_url, user_headers, preserve_data_files
+):
+    preserve_data_files("supplier.json")
+    existing = _first_supplier(base_url, user_headers)
+    headers = _get_headers(user_headers, method="delete")
+
+    first = requests.delete(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+    second = requests.delete(
+        _url(base_url, f"/{existing['id']}"), headers=headers
+    )
+
+    assert first.status_code in (200, 204)
+    assert second.status_code == 404
+
+
+def test_delete_supplier_requires_authentication(base_url):
+    response = requests.delete(_url(base_url, f"/1"))
+
+    assert response.status_code == 401
+
+
+def test_delete_supplier_insufficient_permissions_returns_403(base_url, user_headers):
+    headers = _get_headers(user_headers, method="delete", allowed=False)
+    response = requests.delete(_url(base_url, f"/1"), headers=headers)
+
+    assert response.status_code == 403
+
+
+# endregion
