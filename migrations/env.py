@@ -4,7 +4,7 @@ from pathlib import Path
 from alembic import context
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-from models import Base, get_engine  # noqa: E402
+from models import Base, get_engine
 
 target_metadata = Base.metadata
 
