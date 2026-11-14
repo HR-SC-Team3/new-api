@@ -2,12 +2,13 @@ import os
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Numeric, create_engine
+from sqlalchemy import DateTime, ForeignKey, Numeric, create_engine
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 class Base(DeclarativeBase):
-    type_annotation_map = {datetime: DateTime(timezone=True), dict: JSON}
+    type_annotation_map = {datetime: DateTime(timezone=True), dict: JSONB}
 
 
 def get_engine(url=None):
@@ -20,7 +21,7 @@ def pk():
 
 
 def fk(target):
-    return mapped_column(ForeignKey(target))
+    return mapped_column(ForeignKey(target), index=True)
 
 
 class Warehouse(Base):
@@ -135,7 +136,7 @@ class Item(Base):
 class Inventory(Base):
     __tablename__ = "inventory"
     item_id: Mapped[int] = mapped_column(ForeignKey("item.id"), primary_key=True)
-    location_id: Mapped[int] = mapped_column(ForeignKey("location.id"), primary_key=True)
+    location_id: Mapped[int] = mapped_column(ForeignKey("location.id"), primary_key=True, index=True)
     quantity_on_hand: Mapped[int]
     quantity_expected: Mapped[int]
     quantity_ordered: Mapped[int]
