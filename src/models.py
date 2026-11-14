@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, create_engine
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -49,6 +49,14 @@ class Location(Base):
     name: Mapped[str]
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
+    outgoing_transfers: Mapped[list["Transfer"]] = relationship(
+        back_populates="from_location",
+        foreign_keys=lambda: [Transfer.from_location_id],
+    )
+    incoming_transfers: Mapped[list["Transfer"]] = relationship(
+        back_populates="to_location",
+        foreign_keys=lambda: [Transfer.to_location_id],
+    )
 
 
 class Supplier(Base):
@@ -82,6 +90,18 @@ class Client(Base):
     contact_email: Mapped[str]
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
+    orders: Mapped[list["Order"]] = relationship(
+        back_populates="client",
+        foreign_keys=lambda: [Order.client_id],
+    )
+    ship_to_orders: Mapped[list["Order"]] = relationship(
+        back_populates="ship_to_client",
+        foreign_keys=lambda: [Order.ship_to_client_id],
+    )
+    bill_to_orders: Mapped[list["Order"]] = relationship(
+        back_populates="bill_to_client",
+        foreign_keys=lambda: [Order.bill_to_client_id],
+    )
 
 
 class ItemGroup(Base):
@@ -160,6 +180,22 @@ class Order(Base):
     bill_to_client_id: Mapped[int] = fk("client.id")
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
+    client: Mapped["Client"] = relationship(
+        back_populates="orders",
+        foreign_keys=[client_id],
+    )
+    ship_to_client: Mapped["Client"] = relationship(
+        back_populates="ship_to_orders",
+        foreign_keys=[ship_to_client_id],
+    )
+    bill_to_client: Mapped["Client"] = relationship(
+        back_populates="bill_to_orders",
+        foreign_keys=[bill_to_client_id],
+    )
+    items: Mapped[list["OrderItem"]] = relationship(
+        back_populates="order",
+        cascade="all, delete-orphan",
+    )
 
 
 class OrderItem(Base):
@@ -169,6 +205,7 @@ class OrderItem(Base):
     item_id: Mapped[int] = fk("item.id")
     amount: Mapped[int]
     unit_price: Mapped[Decimal] = mapped_column(Numeric(10, 2))
+    order: Mapped["Order"] = relationship(back_populates="items")
 
 
 class Shipment(Base):
@@ -203,6 +240,14 @@ class Transfer(Base):
     transfer_status: Mapped[str]
     created_at: Mapped[datetime]
     updated_at: Mapped[datetime]
+    from_location: Mapped["Location"] = relationship(
+        back_populates="outgoing_transfers",
+        foreign_keys=[from_location_id],
+    )
+    to_location: Mapped["Location"] = relationship(
+        back_populates="incoming_transfers",
+        foreign_keys=[to_location_id],
+    )
 
 
 class TransferItem(Base):
