@@ -2,6 +2,8 @@ import os
 from datetime import datetime
 from decimal import Decimal
 
+from dotenv import load_dotenv
+
 from sqlalchemy import DateTime, ForeignKey, Numeric, create_engine, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -12,6 +14,7 @@ class Base(DeclarativeBase):
 
 
 def get_engine(url=None):
+    load_dotenv()
     url = url or os.environ["DATABASE_URL"].replace("postgresql://", "postgresql+psycopg://", 1)
     return create_engine(url)
 
