@@ -78,7 +78,11 @@ def test_missing_api_key_returns_401(client):
 
 
 def test_unknown_api_key_returns_401(client):
-    response = client.get("/api/v1/warehouses", headers={"API_KEY": "nope"})
+    # A generated key that is never added to db_users, so it stays unknown.
+    unknown_key = make_user_for_permutation("warehouses", "get", True)["api_key"]
+    response = client.get(
+        "/api/v1/warehouses", headers={auth.API_KEY_HEADER: unknown_key}
+    )
     assert response.status_code == 401
 
 
@@ -103,18 +107,33 @@ def test_public_path_needs_no_key(client):
     assert client.get("/").status_code == 200
 
 
-def test_cache_miss_fills_cache(client, db_users, fake_cache):
+def test_cache_miss_request_succeeds(client, db_users):
+    headers = _add_user(db_users, "warehouses", "get", True)
+    response = client.get("/api/v1/warehouses", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_cache_hit_request_succeeds(client, db_users):
+    headers = _add_user(db_users, "warehouses", "get", True)
+    client.get("/api/v1/warehouses", headers=headers)
+    response = client.get("/api/v1/warehouses", headers=headers)
+    assert response.status_code == 200
+    assert response.json() == []
+    assert len(db_users["_lookups"]) == 1
+
+
+def test_find_user_fills_cache_on_miss(db_users, fake_cache):
     headers = _add_user(db_users, "warehouses", "get", True)
     key = headers[auth.API_KEY_HEADER]
-    client.get("/api/v1/warehouses", headers=headers)
-    assert key in fake_cache.store
+    assert auth.find_user(key) == db_users[key]
+    assert fake_cache.store[key] == db_users[key]
 
 
-def test_cache_hit_skips_database(client, db_users):
-    headers = _add_user(db_users, "warehouses", "get", True)
-    client.get("/api/v1/warehouses", headers=headers)
-    client.get("/api/v1/warehouses", headers=headers)
-    assert len(db_users["_lookups"]) == 1
+def test_find_user_unknown_key_is_not_cached(db_users, fake_cache):
+    key = make_user_for_permutation("warehouses", "get", True)["api_key"]
+    assert auth.find_user(key) is None
+    assert key not in fake_cache.store
 
 
 def test_redis_down_falls_back_to_database(client, db_users, fake_cache):
