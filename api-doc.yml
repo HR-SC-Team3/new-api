@@ -1345,9 +1345,10 @@ components:
             in: header
             name: API_KEY
             description: >-
-                Looked up against /data/user.json by auth_provider.get_user(); the
-                matching user's endpoint_access map then gates each resource+verb via
-                auth_provider.has_access().
+                Looked up in Redis first, then in the PostgreSQL `user` table. A missing
+                or unknown key returns 401. The matching user's endpoint_access map
+                then gates each resource+verb; a denied request returns 403. Only
+                `/`, `/docs`, `/redoc` and `/openapi.json` need no key.
     parameters:
         IdPathParam:
             name: id

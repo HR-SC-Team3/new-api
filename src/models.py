@@ -255,6 +255,6 @@ class TransferItem(Base):
 class User(Base):
     __tablename__ = "user"
     id: Mapped[int] = pk()
-    api_key: Mapped[str]
+    api_key: Mapped[str] = mapped_column(index=True, unique=True)
     app: Mapped[str]
     endpoint_access: Mapped[dict]
