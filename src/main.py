@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 
+from auth import auth_middleware
+
 app = FastAPI()
+app.middleware("http")(auth_middleware)
 
 
 @app.get("/")
