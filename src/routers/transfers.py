@@ -1,12 +1,8 @@
-from fastapi import APIRouter, HTTPException, status
-
+from fastapi import APIRouter, status
+from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
 from src.schema_validations import Transfer as TransferSchema
 
 router = APIRouter(prefix="/api/v1/transfers", tags=["transfers"])
-NOT_IMPLEMENTED = {501: {"description": "Not implemented"}}
-
-def _not_implemented():
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not implemented",)
 
 @router.get("", response_model=list[TransferSchema], responses=NOT_IMPLEMENTED)
 def list_transfers():

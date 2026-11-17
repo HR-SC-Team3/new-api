@@ -1,12 +1,8 @@
-from fastapi import APIRouter, HTTPException, status
-
+from fastapi import APIRouter, status
+from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
 from src.schema_validations import Warehouse as WarehouseSchema
 
 router = APIRouter(prefix="/api/v1/warehouses", tags=["warehouses"])
-NOT_IMPLEMENTED = {501: {"description": "Not implemented"}}
-
-def _not_implemented():
-    raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Not implemented",)
 
 @router.get("", response_model=list[WarehouseSchema], responses=NOT_IMPLEMENTED)
 def list_warehouses():
