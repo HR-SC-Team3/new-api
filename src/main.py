@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from src.routers.api import api_router
+from routers.api import api_router
 
 from auth import auth_middleware
 
@@ -15,4 +15,4 @@ def read_root():
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=3000)

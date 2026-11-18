@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
-from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
-from src.schema_validations import Inventory as InventorySchema
+from routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
+from schema_validations import Inventory as InventorySchema
 
 router = APIRouter(prefix="/api/v1/inventories", tags=["inventories"])
 @router.get("", response_model=list[InventorySchema], responses=NOT_IMPLEMENTED)

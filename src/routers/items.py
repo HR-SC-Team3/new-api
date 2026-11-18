@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, status
-from src.schema_validations import Item as ItemSchema, ItemInput
-from src.schema_validations import (Inventory as InventorySchema,)
+from schema_validations import Item as ItemSchema, ItemInput
+from schema_validations import (Inventory as InventorySchema,)
 
 router = APIRouter(prefix="/api/v1/items", tags = ["items"])
 not_implemented = {"501": {"description": "Not implemented"}}

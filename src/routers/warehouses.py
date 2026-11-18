@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
-from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
-from src.schema_validations import Warehouse as WarehouseSchema
+from routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
+from schema_validations import Warehouse as WarehouseSchema
 
 router = APIRouter(prefix="/api/v1/warehouses", tags=["warehouses"])
 

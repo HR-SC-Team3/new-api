@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
-from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
-from src.schema_validations import Client as ClientSchema
+from routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
+from schema_validations import Client as ClientSchema
 
 router = APIRouter(prefix="/api/v1/clients", tags=["clients"])
 NOT_IMPLEMENTED = {501: {"description": "Not implemented"}}

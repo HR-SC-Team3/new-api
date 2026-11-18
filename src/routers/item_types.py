@@ -1,6 +1,6 @@
 from fastapi import APIRouter, status
-from src.routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
-from src.schema_validations import ItemType as ItemTypeSchema
+from routers.stub_helpers import NOT_IMPLEMENTED, _not_implemented
+from schema_validations import ItemType as ItemTypeSchema
 
 router = APIRouter(prefix="/api/v1/item_types", tags=["item_types"])
 
