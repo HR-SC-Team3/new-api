@@ -24,4 +24,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
-py-modules = ["main", "auth", "cache", "db", "models"]
+py-modules = ["main", "auth", "cache", "db", "models", "models", "schema_validations"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["routers*"]
