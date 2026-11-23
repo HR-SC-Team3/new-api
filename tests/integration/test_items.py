@@ -10,7 +10,7 @@ from schemas import Item
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ITEMS_MODEL_SOURCE = (
-    REPO_ROOT / "api" / "models" / "items.py"
+    REPO_ROOT  / "src" / "models.py"
 ).read_text(encoding="utf-8")
 
 
@@ -32,6 +32,47 @@ def _first_item(base_url, user_headers):
 
     return body[0]
 
+@pytest.fixture
+def test_item(base_url, user_headers):
+    existing = _first_item(base_url, user_headers)
+
+    payload = {
+        **existing,
+        "id": 777777,
+        "code": "ITM-777777",
+        "description": "Temporary Test Item",
+    }
+
+    response = requests.post(
+        _url(base_url),
+        headers=_get_headers(user_headers, method="post"),
+        json=payload,
+    )
+
+    assert response.status_code == 201, response.text
+
+    yield payload
+
+    delete_response = requests.delete(
+        _url(base_url, "/777777"),
+        headers=_get_headers(user_headers, method="delete"),
+    )
+
+    assert delete_response.status_code in (200, 204, 404)
+    
+@pytest.fixture
+def cleanup_items(base_url, user_headers):
+    item_ids = []
+
+    yield item_ids
+
+    headers = _get_headers(user_headers, method="delete")
+
+    for item_id in item_ids:
+        requests.delete(
+            _url(base_url, f"/{item_id}"),
+            headers=headers,
+        )
 
 # endregion
 
@@ -401,16 +442,15 @@ def test_get_item_malformed_id_error_leaks_no_internal_details(
 
 
 def test_post_item_returns_created_resource_with_id(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, cleanup_items
 ):
-    preserve_data_files("item.json")
 
     existing = _first_item(base_url, user_headers)
 
     payload = {
         **existing,
-        "id": 555555,
-        "code": "ITM-555555",
+        "id": 777778,
+        "code": "ITM-777778",
         "description": "Test Item",
     }
 
@@ -424,27 +464,29 @@ def test_post_item_returns_created_resource_with_id(
         headers=headers,
         json=payload,
     )
+    
+    if response.status_code == 201:
+        cleanup_items.append(777778)
 
     assert response.status_code == 201
 
     body = response.json()
 
     assert "id" in body
-    assert body["id"] == 555555
+    assert body["id"] == 777778
     assert body["description"] == "Test Item"
 
 
 def test_post_item_response_points_to_new_resource(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, cleanup_items
 ):
-    preserve_data_files("item.json")
-
+    
     existing = _first_item(base_url, user_headers)
 
     payload = {
         **existing,
-        "id": 555556,
-        "code": "ITM-555556",
+        "id": 777779,
+        "code": "ITM-777779",
         "description": "Location Test Item",
     }
 
@@ -458,12 +500,15 @@ def test_post_item_response_points_to_new_resource(
         headers=headers,
         json=payload,
     )
+    
+    if response.status_code == 201:
+        cleanup_items.append(777779)
 
     assert response.status_code == 201
 
     assert (
         "Location" in response.headers
-        or response.json().get("id") == 555556
+        or response.json().get("id") == 777779
     )
 
 
@@ -509,11 +554,10 @@ def test_post_item_invalid_field_type_is_rejected(
     assert response.status_code in (400, 422)
 
 def test_post_item_duplicate_id_returns_conflict(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     headers = _get_headers(
         user_headers,
@@ -533,16 +577,15 @@ def test_post_item_duplicate_id_returns_conflict(
 
 
 def test_post_item_is_immediately_retrievable(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, cleanup_items
 ):
-    preserve_data_files("item.json")
 
     existing = _first_item(base_url, user_headers)
 
     payload = {
         **existing,
-        "id": 555557,
-        "code": "ITM-555557",
+        "id": 777780,
+        "code": "ITM-777780",
         "description": "Retrievable Item",
     }
 
@@ -551,11 +594,14 @@ def test_post_item_is_immediately_retrievable(
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
+    
+    if create_response.status_code == 201:
+        cleanup_items.append(777780)
 
     assert create_response.status_code == 201
 
     get_response = requests.get(
-        _url(base_url, "/555557"),
+        _url(base_url, "/777780"),
         headers=_get_headers(user_headers),
     )
 
@@ -576,10 +622,9 @@ def test_post_item_is_immediately_retrievable(
 def test_post_item_invalid_foreign_key_is_rejected(
     base_url,
     user_headers,
-    preserve_data_files,
+    cleanup_items,
     foreign_key,
 ):
-    preserve_data_files("item.json")
 
     existing = _first_item(base_url, user_headers)
 
@@ -595,6 +640,9 @@ def test_post_item_invalid_foreign_key_is_rejected(
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
+    
+    if response.status_code == 201:
+        cleanup_items.append(555558)
 
     assert response.status_code in (400, 404, 409, 422)
 
@@ -645,10 +693,6 @@ def test_post_item_wrong_content_type_is_rejected(
     assert response.status_code == 415
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="API returns 500 for malformed JSON instead of 400",
-)
 def test_post_item_malformed_json_body_returns_400(
     base_url, user_headers, preserve_data_files
 ):
@@ -703,11 +747,10 @@ def test_post_item_malformed_json_body_leaks_no_internal_details(
 
 
 def test_put_item_valid_payload_returns_200(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     updated = {
         **existing,
@@ -724,11 +767,10 @@ def test_put_item_valid_payload_returns_200(
 
 
 def test_put_item_update_is_persisted(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     updated = {
         **existing,
@@ -779,6 +821,8 @@ def test_put_item_malformed_id_returns_400(
     preserve_data_files("item.json")
 
     existing = _first_item(base_url, user_headers)
+    
+    existing["id"] = 1
 
     response = requests.put(
         _url(base_url, "/not-an-id"),
@@ -790,11 +834,10 @@ def test_put_item_malformed_id_returns_400(
 
 
 def test_put_item_invalid_field_type_is_rejected(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     updated = {
         **existing,
@@ -822,12 +865,11 @@ def test_put_item_invalid_field_type_is_rejected(
 def test_put_item_invalid_foreign_key_is_rejected(
     base_url,
     user_headers,
-    preserve_data_files,
+    test_item,
     foreign_key,
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     updated = {
         **existing,
@@ -876,11 +918,10 @@ def test_put_item_insufficient_permissions_returns_403(
 # region DELETE /items/{id}
 
 def test_delete_item_valid_id_returns_200(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     response = requests.delete(
         _url(base_url, f"/{existing['id']}"),
@@ -891,11 +932,10 @@ def test_delete_item_valid_id_returns_200(
 
 
 def test_delete_item_resource_is_actually_gone(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     delete_response = requests.delete(
         _url(base_url, f"/{existing['id']}"),
@@ -938,11 +978,10 @@ def test_delete_item_malformed_id_returns_400(
 
 
 def test_delete_item_repeated_delete_returns_404(
-    base_url, user_headers, preserve_data_files
+    base_url, user_headers, test_item
 ):
-    preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
+    existing = test_item
 
     headers = _get_headers(
         user_headers,
@@ -1167,20 +1206,24 @@ def test_get_item_inventory_totals_response_content_type_is_json(
     ],
 )
 def test_post_item_rejects_out_of_range_values(
-    base_url, user_headers, preserve_data_files, override, expected_message
+    base_url, user_headers, cleanup_items, override, expected_message
 ):
-    preserve_data_files("item.json")
-
-    payload = {**_first_item(base_url, user_headers), "id": 999991, **override}
+    payload = {
+        **_first_item(base_url, user_headers),
+        "id": 999991,
+        **override,
+    }
 
     response = requests.post(
         _url(base_url),
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
+    
+    if response.status_code == 201:
+        cleanup_items.append(payload["id"])
 
     assert response.status_code == 422
     assert expected_message in response.json()["error"]
-
 
 # endregion

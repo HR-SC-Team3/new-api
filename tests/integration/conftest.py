@@ -12,11 +12,17 @@ import pytest
 import requests
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-API_DIR = REPO_ROOT / "api"
+API_DIR = REPO_ROOT / "src"
 DATA_DIR = REPO_ROOT / "data"
 SCRIPTS_DIR = REPO_ROOT / "scripts"
 
+sys.path.insert(0, str(API_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR))
+
+import cache
+from db import get_session_factory
+from models import User
+
 from permission_users import make_user_for_permutation  # noqa: E402
 
 # Deliberately 127.0.0.1, not "localhost": resolving "localhost" added a
@@ -172,34 +178,47 @@ def user_headers():
         for user in users:
             if app is not None and user.get("app") != app:
                 continue
+
             if resource is not None:
                 perms = user.get("endpoint_access", {}).get(resource, {})
                 if perms.get(method, False) != allowed:
                     continue
+
             return {"API_KEY": user["api_key"]}
 
         if app is not None or resource is None:
-            raise LookupError(
-                f"No user found for app={app!r} resource={resource!r} "
-                f"method={method!r} allowed={allowed!r}"
-            )
+            raise LookupError("No matching user found")
 
         new_user = make_user_for_permutation(resource, method, allowed)
-        with open(DATA_DIR / "user.json", "r") as f:
-            all_users = json.load(f)
-        all_users.append(new_user)
-        with open(DATA_DIR / "user.json", "w") as f:
-            json.dump(all_users, f, indent=4)
-            f.write("\n")
+
+        Session = get_session_factory()
+
+        with Session() as session:
+            db_user = User(
+                api_key=new_user["api_key"],
+                app=new_user["app"],
+                endpoint_access=new_user["endpoint_access"],
+            )
+            session.add(db_user)
+            session.commit()
+
         generated_api_keys.append(new_user["api_key"])
+
         return {"API_KEY": new_user["api_key"]}
 
     yield _user_headers
 
-    if generated_api_keys:
-        with open(DATA_DIR / "user.json", "r") as f:
-            all_users = json.load(f)
-        all_users = [u for u in all_users if u["api_key"] not in generated_api_keys]
-        with open(DATA_DIR / "user.json", "w") as f:
-            json.dump(all_users, f, indent=4)
-            f.write("\n")
+    Session = get_session_factory()
+
+    with Session() as session:
+        for api_key in generated_api_keys:
+            cache.invalidate_api_key(api_key)
+
+            user = session.query(User).filter(
+                User.api_key == api_key
+            ).one_or_none()
+
+            if user is not None:
+                session.delete(user)
+
+        session.commit()
