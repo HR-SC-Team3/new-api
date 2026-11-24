@@ -72,10 +72,31 @@ def upgrade() -> None:
                     f"{table} still references it."
                 )
 
-        connection.execute(
-            sa.text("DELETE FROM item WHERE id = :item_id"),
-            {"item_id": item_id},
+        result = connection.execute(
+            sa.text(
+                """
+                DELETE FROM item
+                WHERE id = :item_id
+                AND description = :description
+                AND code = :code
+                AND case_size IS NOT DISTINCT FROM :case_size
+                AND order_multiple IS NOT DISTINCT FROM :order_multiple
+                """
+            ),
+            {
+                "item_id": item_id,
+                "description": description,
+                "code": code,
+                "case_size": case_size,
+                "order_multiple": order_multiple,
+            },
         )
+
+        if result.rowcount != 1:
+            raise RuntimeError(
+                f"Cannot remove item ID {item_id}: "
+                "its values changed before deletion."
+            )
 
 
 def downgrade() -> None:

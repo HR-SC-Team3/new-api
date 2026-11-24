@@ -1,3 +1,4 @@
+
 """Remove duplicate item with ID 0.
 
 Revision ID: 0003
@@ -19,26 +20,28 @@ def upgrade() -> None:
     connection = op.get_bind()
 
     duplicate = connection.execute(
-        sa.text(
-            "SELECT code, description FROM item WHERE id = 0"
-        )
-    ).fetchone()
+        sa.text("SELECT * FROM item WHERE id = 0")
+    ).mappings().fetchone()
 
     if duplicate is None:
         return
 
     original = connection.execute(
-        sa.text(
-            "SELECT code, description FROM item WHERE id = 1"
-        )
-    ).fetchone()
+        sa.text("SELECT * FROM item WHERE id = 1")
+    ).mappings().fetchone()
 
     if original is None:
         raise RuntimeError(
             "Cannot remove item ID 0: item ID 1 does not exist."
         )
 
-    if duplicate.code != original.code or duplicate.description != original.description:
+    excluded_fields = {"id", "created_at", "updated_at"}
+
+    if any(
+        duplicate[field] != original[field]
+        for field in duplicate.keys()
+        if field not in excluded_fields
+    ):
         raise RuntimeError(
             "Cannot remove item ID 0: it does not match item ID 1."
         )
