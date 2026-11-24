@@ -19,16 +19,27 @@ from schema_validations import (
     Inventory as InventorySchema,
 )
 
+MAX_ITEM_ID = 2_147_483_647
+MIN_ITEM_ID = 1
+
 router = APIRouter(prefix="/api/v1/items", tags=["items"])
 
 def parse_id(id: str) -> int:
     try:
-        return int(id)
+        item_id = int(id)
     except ValueError:
         raise HTTPException(
             status_code=400,
-            detail="Invalid item ID",
+            detail="Invalid item ID"
         )
+
+    if not MIN_ITEM_ID <= item_id <= MAX_ITEM_ID:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid item ID"
+        )
+
+    return item_id
 
 
 def check_foreign_keys(session, data):

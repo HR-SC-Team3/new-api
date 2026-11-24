@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import requests
 
+import uuid
+
 from schemas import Item
 
 
@@ -23,24 +25,43 @@ def _url(base_url, path=""):
 def _get_headers(user_headers, method="get", allowed=True):
     return user_headers(resource="items", method=method, allowed=allowed)
 
-
-def _first_item(base_url, user_headers):
+def _unique_item_id(base_url, user_headers):
     headers = _get_headers(user_headers)
-    body = requests.get(_url(base_url), headers=headers).json()
 
-    assert body, "fixture data/item.json is expected to be non-empty"
+    while True:
+        item_id = uuid.uuid4().int % 1_000_000_000 + 1_000_000_000
 
-    return body[0]
+        response = requests.get(
+            _url(base_url, f"/{item_id}"),
+            headers=headers,
+        )
+
+        if response.status_code == 404:
+            return item_id
+
+        assert response.status_code == 200, response.text
 
 @pytest.fixture
 def test_item(base_url, user_headers):
-    existing = _first_item(base_url, user_headers)
-
+    item_id = _unique_item_id(base_url, user_headers)
+    
     payload = {
-        **existing,
-        "id": 777777,
-        "code": "ITM-777777",
+        "id": item_id,
+        "code": f"ITM-{item_id}",
         "description": "Temporary Test Item",
+        "barcode": f"TEST-{item_id}",
+        "model_number": f"MODEL-{item_id}",
+        "commodity_code": 12345,
+        "unit_weight": 1.5,
+        "item_line_id": 1,
+        "item_group_id": 1,
+        "item_type_id": 1,
+        "min_purchase_qty": 1,
+        "case_size": 1,
+        "packaging_type": "Box",
+        "order_multiple": 1,
+        "supplier_id": 1,
+        "supplier_sku": f"SKU-{item_id}",
     }
 
     response = requests.post(
@@ -51,10 +72,12 @@ def test_item(base_url, user_headers):
 
     assert response.status_code == 201, response.text
 
-    yield payload
+    created_item = response.json()
+
+    yield created_item
 
     delete_response = requests.delete(
-        _url(base_url, "/777777"),
+        _url(base_url, f"/{created_item['id']}"),
         headers=_get_headers(user_headers, method="delete"),
     )
 
@@ -324,28 +347,26 @@ def test_error_response_leaks_no_internal_details(base_url):
 
 
 def test_get_item_by_id_returns_200_with_correct_resource(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
     headers = _get_headers(user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}"),
+        _url(base_url, f"/{test_item['id']}"),
         headers=headers,
     )
 
     assert response.status_code == 200
-    assert response.json() == existing
+    assert response.json() == test_item
 
 
 def test_get_item_by_id_matches_documented_schema(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
     headers = _get_headers(user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}"),
+        _url(base_url, f"/{test_item['id']}"),
         headers=headers,
     )
 
@@ -401,12 +422,11 @@ def test_get_item_insufficient_permissions_returns_403(
 
 
 def test_get_item_response_content_type_is_json(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}"),
+        _url(base_url, f"/{test_item['id']}"),
         headers=_get_headers(user_headers),
     )
 
@@ -444,13 +464,11 @@ def test_get_item_malformed_id_error_leaks_no_internal_details(
 def test_post_item_returns_created_resource_with_id(
     base_url, user_headers, cleanup_items
 ):
-
-    existing = _first_item(base_url, user_headers)
+    item_id = _unique_item_id(base_url, user_headers)
 
     payload = {
-        **existing,
-        "id": 777778,
-        "code": "ITM-777778",
+        "id": item_id,
+        "code": f"ITM-{item_id}",
         "description": "Test Item",
     }
 
@@ -466,27 +484,25 @@ def test_post_item_returns_created_resource_with_id(
     )
     
     if response.status_code == 201:
-        cleanup_items.append(777778)
+        cleanup_items.append(item_id)
 
     assert response.status_code == 201
 
     body = response.json()
 
     assert "id" in body
-    assert body["id"] == 777778
+    assert body["id"] == item_id
     assert body["description"] == "Test Item"
 
 
 def test_post_item_response_points_to_new_resource(
     base_url, user_headers, cleanup_items
 ):
-    
-    existing = _first_item(base_url, user_headers)
+    item_id = _unique_item_id(base_url, user_headers)
 
     payload = {
-        **existing,
-        "id": 777779,
-        "code": "ITM-777779",
+        "id": item_id,
+        "code": f"ITM-{item_id}",
         "description": "Location Test Item",
     }
 
@@ -502,13 +518,13 @@ def test_post_item_response_points_to_new_resource(
     )
     
     if response.status_code == 201:
-        cleanup_items.append(777779)
+        cleanup_items.append(item_id)
 
     assert response.status_code == 201
 
     assert (
         "Location" in response.headers
-        or response.json().get("id") == 777779
+        or response.json().get("id") == item_id
     )
 
 
@@ -579,13 +595,11 @@ def test_post_item_duplicate_id_returns_conflict(
 def test_post_item_is_immediately_retrievable(
     base_url, user_headers, cleanup_items
 ):
-
-    existing = _first_item(base_url, user_headers)
+    item_id = _unique_item_id(base_url, user_headers)
 
     payload = {
-        **existing,
-        "id": 777780,
-        "code": "ITM-777780",
+        "id": item_id,
+        "code": f"ITM-{item_id}",
         "description": "Retrievable Item",
     }
 
@@ -596,12 +610,12 @@ def test_post_item_is_immediately_retrievable(
     )
     
     if create_response.status_code == 201:
-        cleanup_items.append(777780)
+        cleanup_items.append(item_id)
 
     assert create_response.status_code == 201
 
     get_response = requests.get(
-        _url(base_url, "/777780"),
+        _url(base_url, f"/{item_id}"),
         headers=_get_headers(user_headers),
     )
 
@@ -625,13 +639,12 @@ def test_post_item_invalid_foreign_key_is_rejected(
     cleanup_items,
     foreign_key,
 ):
-
-    existing = _first_item(base_url, user_headers)
+    item_id = _unique_item_id(base_url, user_headers)
 
     payload = {
-        **existing,
-        "id": 555558,
-        "code": "ITM-555558",
+        "id": item_id,
+        "code": f"ITM-{item_id}",
+        "description": "Invalid Foreign Key Test",
         foreign_key: 999999,
     }
 
@@ -642,7 +655,7 @@ def test_post_item_invalid_foreign_key_is_rejected(
     )
     
     if response.status_code == 201:
-        cleanup_items.append(555558)
+        cleanup_items.append(item_id)
 
     assert response.status_code in (400, 404, 409, 422)
 
@@ -798,11 +811,9 @@ def test_put_item_nonexistent_id_returns_404(
 ):
     preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
-
     updated = {
-        **existing,
         "id": 999999,
+        "code": "ITM-999999",
         "description": "Ghost Item",
     }
 
@@ -820,14 +831,16 @@ def test_put_item_malformed_id_returns_400(
 ):
     preserve_data_files("item.json")
 
-    existing = _first_item(base_url, user_headers)
-    
-    existing["id"] = 1
+    payload = {
+        "id": 1,
+        "code": "ITM-000001",
+        "description": "Malformed ID Test",
+    }
 
     response = requests.put(
         _url(base_url, "/not-an-id"),
         headers=_get_headers(user_headers, method="put"),
-        json=existing,
+        json=payload,
     )
 
     assert response.status_code == 400
@@ -1036,12 +1049,11 @@ def test_delete_item_insufficient_permissions_returns_403(
 
 
 def test_get_item_inventory_returns_200(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}/inventory"),
+        _url(base_url, f"/{test_item['id']}/inventory"),
         headers=_get_headers(user_headers),
     )
 
@@ -1050,12 +1062,11 @@ def test_get_item_inventory_returns_200(
 
 
 def test_get_item_inventory_only_returns_correct_item_inventory(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}/inventory"),
+        _url(base_url, f"/{test_item['id']}/inventory"),
         headers=_get_headers(user_headers),
     )
 
@@ -1066,7 +1077,7 @@ def test_get_item_inventory_only_returns_correct_item_inventory(
     for inventory in body:
         if isinstance(inventory, dict):
             if "item_id" in inventory:
-                assert inventory["item_id"] == existing["id"]
+                assert inventory["item_id"] == test_item["id"]
 
 
 def test_get_item_inventory_nonexistent_item_returns_404(
@@ -1105,12 +1116,11 @@ def test_get_item_inventory_insufficient_permissions_returns_403(
 
 
 def test_get_item_inventory_response_content_type_is_json(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}/inventory"),
+        _url(base_url, f"/{test_item['id']}/inventory"),
         headers=_get_headers(user_headers),
     )
 
@@ -1126,12 +1136,11 @@ def test_get_item_inventory_response_content_type_is_json(
 
 
 def test_get_item_inventory_totals_returns_200(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}/inventory/totals"),
+        _url(base_url, f"/{test_item['id']}/inventory/totals"),
         headers=_get_headers(user_headers),
     )
 
@@ -1176,12 +1185,11 @@ def test_get_item_inventory_totals_insufficient_permissions_returns_403(
 
 
 def test_get_item_inventory_totals_response_content_type_is_json(
-    base_url, user_headers
+    base_url, user_headers, test_item
 ):
-    existing = _first_item(base_url, user_headers)
 
     response = requests.get(
-        _url(base_url, f"/{existing['id']}/inventory/totals"),
+        _url(base_url, f"/{test_item['id']}/inventory/totals"),
         headers=_get_headers(user_headers),
     )
 
@@ -1208,9 +1216,12 @@ def test_get_item_inventory_totals_response_content_type_is_json(
 def test_post_item_rejects_out_of_range_values(
     base_url, user_headers, cleanup_items, override, expected_message
 ):
+    item_id = _unique_item_id(base_url, user_headers)
+
     payload = {
-        **_first_item(base_url, user_headers),
-        "id": 999991,
+        "id": item_id,
+        "code": f"ITM-{item_id}",
+        "description": "Range Validation Test",
         **override,
     }
 
@@ -1220,7 +1231,7 @@ def test_post_item_rejects_out_of_range_values(
         json=payload,
     )
     
-    if response.status_code == 201:
+    if response.status_code == 201 and payload["id"] != 0:
         cleanup_items.append(payload["id"])
 
     assert response.status_code == 422

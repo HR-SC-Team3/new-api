@@ -9,7 +9,6 @@ from auth import auth_middleware
 app = FastAPI()
 
 app.include_router(api_router)
-app.middleware("http")(auth_middleware)
 
 
 @app.get("/")
@@ -34,6 +33,8 @@ async def check_item_content_type(request, call_next):
             )
 
     return await call_next(request)
+
+app.middleware("http")(auth_middleware)
 
 
 @app.exception_handler(RequestValidationError)
