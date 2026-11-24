@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt, ConfigDict
+from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt, ConfigDict, Field
 
 
 class ItemAmount(BaseModel):
@@ -155,20 +155,20 @@ class Item(BaseModel):
     updated_at: datetime | None = None
 
 class ItemInput(BaseModel):
-    id: int
+    id: PositiveInt = Field(le=2_147_483_647)
     code: str
     description: str | None = None
     barcode: str | None = None
     model_number: str | None = None
     commodity_code: int | None = None
-    unit_weight: float | None = None
+    unit_weight: NonNegativeFloat | None = None
     item_line_id: int | None = None
     item_group_id: int | None = None
     item_type_id: int | None = None
-    min_purchase_qty: int | None = None
-    case_size: int | None = None
+    min_purchase_qty: PositiveInt | None = None
+    case_size: PositiveInt | None = None
     packaging_type: str | None = None
-    order_multiple: int | None = None
+    order_multiple: PositiveInt | None = None
     supplier_id: int | None = None
     supplier_sku: str | None = None
 

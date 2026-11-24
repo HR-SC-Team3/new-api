@@ -62,10 +62,6 @@ def _load_users():
         return json.load(f)
 
 
-# Any valid key, just to probe that the server has come up.
-_PROBE_API_KEY = _load_users()[0]["api_key"]
-
-
 @pytest.fixture(scope="session")
 def api_server():
     process = subprocess.Popen(
@@ -102,7 +98,6 @@ def api_server():
         try:
             requests.get(
                 f"{BASE_URL}/api/v1/warehouses",
-                headers={"API_KEY": _PROBE_API_KEY},
                 timeout=1,
             )
             break

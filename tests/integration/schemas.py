@@ -158,14 +158,14 @@ class Item(BaseModel):
     model_number: str
     commodity_code: int
     unit_weight: float
-    item_line_id: int
-    item_group_id: int
-    item_type_id: int
+    item_line_id: int | None
+    item_group_id: int | None
+    item_type_id: int | None
     min_purchase_qty: int
     case_size: int
     packaging_type: str
     order_multiple: int
-    supplier_id: int
+    supplier_id: int | None
     supplier_sku: str
     created_at: datetime
     updated_at: datetime
