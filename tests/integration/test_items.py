@@ -17,6 +17,7 @@ def _url(base_url, path=""):
 def _get_headers(user_headers, method="get", allowed=True):
     return user_headers(resource="items", method=method, allowed=allowed)
 
+
 def _unique_item_id(base_url, user_headers):
     headers = _get_headers(user_headers)
 
@@ -32,6 +33,7 @@ def _unique_item_id(base_url, user_headers):
             return item_id
 
         assert response.status_code == 200, response.text
+
 
 def _register_item_for_cleanup(
     base_url, user_headers, cleanup_items, item_id, code, status_code
@@ -54,10 +56,11 @@ def _register_item_for_cleanup(
     ):
         cleanup_items.append(item_id)
 
+
 @pytest.fixture
 def created_item(base_url, user_headers, cleanup_items):
     item_id = _unique_item_id(base_url, user_headers)
-    
+
     payload = {
         "id": item_id,
         "code": f"ITM-{item_id}",
@@ -82,7 +85,7 @@ def created_item(base_url, user_headers, cleanup_items):
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
-    
+
     _register_item_for_cleanup(
         base_url,
         user_headers,
@@ -94,10 +97,9 @@ def created_item(base_url, user_headers, cleanup_items):
 
     assert response.status_code == 201, response.text
 
-    created_item = response.json()
+    yield response.json()
 
-    yield created_item
-    
+
 @pytest.fixture
 def cleanup_items(base_url, user_headers):
     item_ids = []
@@ -111,6 +113,7 @@ def cleanup_items(base_url, user_headers):
             _url(base_url, f"/{item_id}"),
             headers=headers,
         )
+
 
 # endregion
 
@@ -497,7 +500,7 @@ def test_post_item_returns_created_resource_with_id(
         headers=headers,
         json=payload,
     )
-    
+
     _register_item_for_cleanup(
         base_url,
         user_headers,
@@ -537,7 +540,7 @@ def test_post_item_response_points_to_new_resource(
         headers=headers,
         json=payload,
     )
-    
+
     _register_item_for_cleanup(
         base_url,
         user_headers,
@@ -633,7 +636,7 @@ def test_post_item_is_immediately_retrievable(
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
-    
+
     _register_item_for_cleanup(
         base_url,
         user_headers,
@@ -684,7 +687,7 @@ def test_post_item_invalid_foreign_key_is_rejected(
         headers=_get_headers(user_headers, method="post"),
         json=payload,
     )
-    
+
     _register_item_for_cleanup(
         base_url,
         user_headers,
@@ -1177,6 +1180,24 @@ def test_get_item_inventory_totals_returns_200(
     assert response.status_code == 200
 
 
+def test_get_item_inventory_totals_without_inventory_returns_zeros(
+    base_url, user_headers, created_item
+):
+    response = requests.get(
+        _url(base_url, f"/{created_item['id']}/inventory/totals"),
+        headers=_get_headers(user_headers),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "item_id": created_item["id"],
+        "quantity_on_hand": 0,
+        "quantity_expected": 0,
+        "quantity_ordered": 0,
+        "quantity_allocated": 0,
+    }
+
+
 def test_get_item_inventory_totals_nonexistent_item_returns_404(
     base_url, user_headers
 ):
@@ -1242,6 +1263,15 @@ def test_get_item_inventory_totals_response_content_type_is_json(
         ({"case_size": 0}, "greater than 0"),
         ({"order_multiple": -1}, "greater than 0"),
         ({"unit_weight": -0.1}, "greater than or equal to 0"),
+        ({"unit_weight": 100000}, "less than or equal to 99999.999"),
+        ({"item_line_id": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"item_group_id": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"item_type_id": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"supplier_id": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"commodity_code": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"min_purchase_qty": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"case_size": 2_147_483_648}, "less than or equal to 2147483647"),
+        ({"order_multiple": 2_147_483_648}, "less than or equal to 2147483647"),
     ],
 )
 def test_post_item_rejects_out_of_range_values(
