@@ -1,5 +1,8 @@
-
 """Remove duplicate item with ID 0.
+
+This migration deletes rows and cannot be reversed: the deleted test rows are not
+stored anywhere, so downgrade() is a no-op. It only removes rows that still match
+the exact leftover test data, and fails if anything else references them.
 
 Revision ID: 0003
 Revises: 0002

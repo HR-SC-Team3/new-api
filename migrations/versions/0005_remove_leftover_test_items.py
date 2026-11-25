@@ -1,5 +1,9 @@
 """Remove leftover test items.
 
+This migration deletes rows and cannot be reversed: the deleted test rows are not
+stored anywhere, so downgrade() is a no-op. It only removes rows that still match
+the exact leftover test data, and fails if anything else references them.
+
 Revision ID: 0005
 Revises: 0004
 """
@@ -67,10 +71,23 @@ def upgrade() -> None:
                     f"{table} still references it."
                 )
 
-        connection.execute(
-            sa.text("DELETE FROM item WHERE id = :item_id"),
-            {"item_id": item_id},
+        result = connection.execute(
+            sa.text(
+                """
+                DELETE FROM item
+                WHERE id = :item_id
+                AND description = :description
+                AND code = :code
+                """
+            ),
+            {"item_id": item_id, "description": description, "code": code},
         )
+
+        if result.rowcount != 1:
+            raise RuntimeError(
+                f"Cannot remove item ID {item_id}: "
+                "its values changed before deletion."
+            )
 
 
 def downgrade() -> None:
