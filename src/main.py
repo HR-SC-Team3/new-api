@@ -16,39 +16,23 @@ def read_root():
     return {"Hello": "World"}
 
 
-@app.middleware("http")
-async def check_item_content_type(request, call_next):
-    if (
-        request.url.path == "/api/v1/items"
-        or request.url.path.startswith("/api/v1/items/")
-    ) and request.method in ("POST", "PUT"):
-
-        content_type = request.headers.get("content-type", "")
-        content_type = content_type.split(";")[0].strip().lower()
-
-        if content_type != "application/json":
-            return JSONResponse(
-                status_code=415,
-                content={"detail": "Content-Type must be application/json"},
-            )
-
-    return await call_next(request)
-
 app.middleware("http")(auth_middleware)
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request, exc):
-    messages = [
-        error["msg"]
+    # Drop "input" and "ctx": they can echo the client's payload back.
+    errors = [
+        {key: value for key, value in error.items() if key not in ("input", "ctx")}
         for error in exc.errors()
     ]
+    messages = [error["msg"] for error in errors]
 
     return JSONResponse(
         status_code=422,
         content={
             "error": "; ".join(messages),
-            "detail": jsonable_encoder(exc.errors()),
+            "detail": jsonable_encoder(errors),
         },
     )
 

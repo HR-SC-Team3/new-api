@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import func
 
@@ -17,12 +17,34 @@ from schema_validations import (
     Item as ItemSchema,
     ItemInput,
     Inventory as InventorySchema,
+    InventoryTotals,
 )
 
 MAX_ITEM_ID = 2_147_483_647
 MIN_ITEM_ID = 1
 
-router = APIRouter(prefix="/api/v1/items", tags=["items"])
+
+
+def require_json_content_type(request: Request) -> None:
+    if request.method not in ("POST", "PUT"):
+        return
+
+    content_type = request.headers.get("content-type", "")
+    content_type = content_type.split(";")[0].strip().lower()
+
+    if content_type != "application/json":
+        raise HTTPException(
+            status_code=415,
+            detail="Content-Type must be application/json",
+        )
+
+
+router = APIRouter(
+    prefix="/api/v1/items",
+    tags=["items"],
+    dependencies=[Depends(require_json_content_type)],
+)
+
 
 def parse_id(id: str) -> int:
     try:
@@ -224,7 +246,11 @@ def get_item_inventory(id: str):
         return result
 
 
-@router.get("/{id}/inventory/totals", tags=["inventories"],)
+@router.get(
+    "/{id}/inventory/totals",
+    response_model=InventoryTotals,
+    tags=["inventories"],
+)
 def get_item_inventory_totals(id: str):
     item_id = parse_id(id)
 

@@ -1,6 +1,14 @@
 from datetime import datetime
+from typing import Annotated
 
 from pydantic import BaseModel, NonNegativeFloat, NonNegativeInt, PositiveInt, ConfigDict, Field
+
+
+MAX_INT32 = 2_147_483_647
+PositiveInt32 = Annotated[int, Field(gt=0, le=MAX_INT32)]
+Int32 = Annotated[int, Field(ge=-MAX_INT32 - 1, le=MAX_INT32)]
+# item.unit_weight is NUMERIC(8, 3).
+UnitWeight = Annotated[float, Field(ge=0, le=99999.999)]
 
 
 class ItemAmount(BaseModel):
@@ -155,22 +163,31 @@ class Item(BaseModel):
     updated_at: datetime | None = None
 
 class ItemInput(BaseModel):
-    id: PositiveInt = Field(le=2_147_483_647)
+    id: PositiveInt32
     code: str
     description: str | None = None
     barcode: str | None = None
     model_number: str | None = None
-    commodity_code: int | None = None
-    unit_weight: NonNegativeFloat | None = None
-    item_line_id: int | None = None
-    item_group_id: int | None = None
-    item_type_id: int | None = None
-    min_purchase_qty: PositiveInt | None = None
-    case_size: PositiveInt | None = None
+    commodity_code: Int32 | None = None
+    unit_weight: UnitWeight | None = None
+    item_line_id: PositiveInt32 | None = None
+    item_group_id: PositiveInt32 | None = None
+    item_type_id: PositiveInt32 | None = None
+    min_purchase_qty: PositiveInt32 | None = None
+    case_size: PositiveInt32 | None = None
     packaging_type: str | None = None
-    order_multiple: PositiveInt | None = None
-    supplier_id: int | None = None
+    order_multiple: PositiveInt32 | None = None
+    supplier_id: PositiveInt32 | None = None
     supplier_sku: str | None = None
+
+
+class InventoryTotals(BaseModel):
+    item_id: PositiveInt
+    quantity_on_hand: int
+    quantity_expected: int
+    quantity_ordered: int
+    quantity_allocated: int
+
 
 class ItemLine(BaseModel):
     created_at: datetime | None = None
