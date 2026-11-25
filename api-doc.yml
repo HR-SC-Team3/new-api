@@ -243,10 +243,27 @@ paths:
             responses:
                 "201":
                     description: Created
+                    headers:
+                        Location:
+                            schema:
+                                type: string
+                            description: Path of the new item, /api/v1/items/{id}.
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Item"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "415":
+                    $ref: "#/components/responses/UnsupportedMediaType"
+                "422":
+                    $ref: "#/components/responses/ValidationError"
     /items/{id}:
         parameters:
             - $ref: "#/components/parameters/IdPathParam"
@@ -265,10 +282,15 @@ paths:
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "404":
+                    $ref: "#/components/responses/NotFound"
         put:
             tags:
                 - items
             summary: Replace an item
+            description: The id in the body must match the id in the path.
             requestBody:
                 required: true
                 content:
@@ -278,10 +300,24 @@ paths:
             responses:
                 "200":
                     description: OK
+                    content:
+                        application/json:
+                            schema:
+                                $ref: "#/components/schemas/Item"
                 "401":
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
+                "415":
+                    $ref: "#/components/responses/UnsupportedMediaType"
+                "422":
+                    $ref: "#/components/responses/ValidationError"
         delete:
             tags:
                 - items
@@ -293,6 +329,12 @@ paths:
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "404":
+                    $ref: "#/components/responses/NotFound"
+                "409":
+                    $ref: "#/components/responses/Conflict"
     /items/{id}/inventory:
         parameters:
             - $ref: "#/components/parameters/IdPathParam"
@@ -314,6 +356,10 @@ paths:
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "404":
+                    $ref: "#/components/responses/NotFound"
     /items/{id}/inventory/totals:
         parameters:
             - $ref: "#/components/parameters/IdPathParam"
@@ -333,6 +379,10 @@ paths:
                     $ref: "#/components/responses/Unauthorized"
                 "403":
                     $ref: "#/components/responses/Forbidden"
+                "400":
+                    $ref: "#/components/responses/BadRequest"
+                "404":
+                    $ref: "#/components/responses/NotFound"
     /item_lines:
         get:
             tags:
@@ -1364,6 +1414,23 @@ components:
             description: >-
                 API key is valid but its endpoint_access does not permit this
                 resource/verb.
+        BadRequest:
+            description: >-
+                Malformed or out-of-range id (the path id must be 1 to
+                2147483647), body id that differs from the path id, or a foreign
+                key that does not exist.
+        NotFound:
+            description: The resource does not exist.
+        Conflict:
+            description: >-
+                Duplicate id, or a database constraint such as a delete of a row
+                that is still referenced.
+        UnsupportedMediaType:
+            description: Content-Type of a POST or PUT body is not application/json.
+        ValidationError:
+            description: >-
+                Request body failed validation. The body is
+                {"error": "<messages joined by ;>", "detail": [<pydantic errors>]}.
     schemas:
         Warehouse:
             type: object
@@ -1506,10 +1573,13 @@ components:
                     type: number
                 item_line_id:
                     type: integer
+                    nullable: true
                 item_group_id:
                     type: integer
+                    nullable: true
                 item_type_id:
                     type: integer
+                    nullable: true
                 min_purchase_qty:
                     type: integer
                 case_size:
@@ -1520,6 +1590,7 @@ components:
                     type: integer
                 supplier_id:
                     type: integer
+                    nullable: true
                 supplier_sku:
                     type: string
                 created_at:
@@ -1533,6 +1604,8 @@ components:
             properties:
                 id:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 code:
                     type: string
                 description:
@@ -1543,24 +1616,42 @@ components:
                     type: string
                 commodity_code:
                     type: integer
+                    minimum: -2147483648
+                    maximum: 2147483647
                 unit_weight:
                     type: number
+                    minimum: 0
+                    maximum: 99999.999
                 item_line_id:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 item_group_id:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 item_type_id:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 min_purchase_qty:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 case_size:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 packaging_type:
                     type: string
                 order_multiple:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 supplier_id:
                     type: integer
+                    minimum: 1
+                    maximum: 2147483647
                 supplier_sku:
                     type: string
             required:
